@@ -6,9 +6,7 @@ function parsePathPatterns(rule) {
       .flat()
   }
 
-  return [
-    new RegExp(rule.replaceAll("*", ".*?") + (rule.endsWith("/") ? "" : "/")),
-  ]
+  return [new RegExp(rule.replaceAll(".", "\\.").replaceAll("*", ".*?"))]
 }
 
 function parseRobotsTxt(raw) {
