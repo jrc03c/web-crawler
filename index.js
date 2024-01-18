@@ -59,6 +59,24 @@ class WebCrawler {
   }
 
   async start(url, robots, sitemap) {
+    // - fetch and parse robots.txt
+    // - fetch and parse sitemap.xml
+    // - add root and all pages in sitemap.xml to frontier
+    // - while the frontier has urls in it:
+    //   - get a url
+    //   - remove the url from the frontier and add it to the "visited" list
+    //   - if the url is not allowed according to robots.txt, then continue to
+    //     the next url
+    //   - fetch the raw contents at the url
+    //   - if the response header has a "noindex" attribute, then continue to
+    //     the next url
+    //   - if the response text represents an html page, and that page contains
+    //     a meta "noindex" tag, then continue to the next url
+    //   - parse the raw response text as html
+    //   - if parsing was successful, then get all urls in the page and add them
+    //     to the frontier
+    //   - add the content of the page to the search engine index
+
     if (this.isCrawling) return
     this.isCrawling = true
     this.isPaused = false
