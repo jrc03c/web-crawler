@@ -3,6 +3,7 @@
     "@jrc03c/filedb": "^0.0.18",
     "@jrc03c/js-crypto-helpers": "^0.0.9",
     "@jrc03c/js-math-tools": "^0.0.61",
+    "@jrc03c/make-key": "^0.0.14",
     "@jrc03c/pause": "^0.0.3",
     "eslint": "^8.56.0",
     "express": "^4.18.2",

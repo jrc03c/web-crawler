@@ -1,12 +1,15 @@
-const { hash } = require("@jrc03c/js-crypto-helpers")
 const { JSDOM } = require("jsdom")
-const FileDB = require("@jrc03c/filedb")
-const parseRobotsTxt = require("./helpers/parse-robots-txt")
-const pause = require("@jrc03c/pause")
+const RobotsConfig = require("./helpers/robots-config")
+
+class DomainConfig {
+  robotsConfig = null
+  urlsFromSitemaps = []
+}
 
 class WebCrawler {
   cacheDir = null
   delay = 100
+  domainConfigs = {}
   filter = () => true
   frontier = []
   isCrawling = false
@@ -68,8 +71,8 @@ class WebCrawler {
     //   - if the url is not allowed according to robots.txt, then continue to
     //     the next url
     //   - fetch the raw contents at the url
-    //   - if the response header has a "noindex" attribute, then continue to
-    //     the next url
+    //   - if the response header has a "x-robots-tag: noindex" attribute, then
+    //     continue to the next url
     //   - if the response text represents an html page, and that page contains
     //     a meta "noindex" tag, then continue to the next url
     //   - parse the raw response text as html
@@ -82,49 +85,7 @@ class WebCrawler {
     this.isPaused = false
     this.emit("start")
 
-    robots = robots || new URL(url).hostname + "/robots.txt"
-    sitemap = sitemap || new URL(url).hostname + "/sitemap.xml"
-
-    await (async () => {
-      try {
-        const response = await fetch(robots)
-        const raw = await response.text()
-        const rules = parseRobotsTxt(raw)
-      } catch (e) {
-        // ...
-      }
-    })()
-
-    this.frontier.push(url)
-
-    while (this.frontier.length > 0) {
-      const next = this.frontier.shift()
-      this.visited.push(next)
-
-      try {
-        const response = await fetch(next)
-
-        if (response.status === 200) {
-          const raw = await response.text()
-          const dom = new JSDOM(raw)
-
-          this.frontier = this.frontier.concat(
-            Array.from(dom.window.document.querySelectorAll("a"))
-              .filter(
-                a =>
-                  !this.visited.includes(a.href) &&
-                  !this.frontier.includes(a.href) &&
-                  !disallowed.includes(a.href), // this isn't real!
-              )
-              .filter(a => this.filter(a.href)),
-          )
-        } else if (response.status === 301 || response.status === 302) {
-          // ...
-        } else {
-          // ...
-        }
-      } catch (e) {}
-    }
+    // ...
 
     return this
   }
