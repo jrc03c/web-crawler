@@ -46,6 +46,34 @@ class RobotsConfig {
     return config
   }
 
+  isAllowed(bot, path) {
+    if (!this.botRules[bot]) {
+      if (this.botRules["*"]) {
+        bot = "*"
+      } else {
+        return true
+      }
+    }
+
+    if (this.botRules[bot].allow) {
+      for (const pattern of this.botRules[bot].allow) {
+        if (path.match(pattern)) {
+          return true
+        }
+      }
+    }
+
+    if (this.botRules[bot].disallow) {
+      for (const pattern of this.botRules[bot].disallow) {
+        if (path.match(pattern)) {
+          return false
+        }
+      }
+    }
+
+    return true
+  }
+
   toString() {
     return [this.sitemapUrls.map(url => "Sitemap: " + url)]
       .concat(
