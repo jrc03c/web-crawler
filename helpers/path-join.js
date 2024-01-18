@@ -5,7 +5,15 @@ function pathJoin() {
     return ""
   }
 
-  let startsWithForwardSlash = !!args.find(arg => arg.trim().startsWith("/"))
+  let startsWithForwardSlash = (() => {
+    const temp = args.map(v => v.trim()).filter(v => v.length > 0)
+
+    if (temp.length > 0) {
+      return temp[0].startsWith("/")
+    }
+
+    return false
+  })()
 
   const parts = (() => {
     let temp = args.join("/").trim()

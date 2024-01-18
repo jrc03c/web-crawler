@@ -3,6 +3,7 @@ const pathJoin = require("./path-join")
 test("tests that the `pathJoin` function works as expected", () => {
   expect(pathJoin("/foo", "/bar")).toBe("/foo/bar")
   expect(pathJoin("a", "b", "c")).toBe("a/b/c")
+  expect(pathJoin("example.com", "/foo", "/bar")).toBe("example.com/foo/bar")
   expect(pathJoin("", "//hello///", "w/o/r/l/d/")).toBe("/hello/w/o/r/l/d")
   expect(pathJoin("./a/b/c", "./help")).toBe("a/b/c/help")
   expect(pathJoin(" / a/b/ c   / d/e", "../../../test")).toBe("/a/b/test")
