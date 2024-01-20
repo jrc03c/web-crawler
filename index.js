@@ -18,6 +18,82 @@ class WebCrawler {
     this.filter = options.filter || this.filter
   }
 
+  async createDomainConfiguration(domain) {
+    // fetch and parse robots.txt
+    const config = await (async () => {
+      const robotsUrl = pathJoin("https://" + domain, "robots.txt")
+      const response = await fetch(robotsUrl)
+
+      if (response.status === 200) {
+        const raw = await response.text()
+        const config = RobotsConfig.parse(raw)
+        return config
+      } else {
+        this.emit(
+          "warn",
+          `No robots.txt file was found for the domain "${domain}"!`,
+        )
+
+        return new RobotsConfig()
+      }
+    })()
+
+    // fetch and parse sitemap(s)
+    const toCrawl = await (async () => {
+      const sitemapUrls = config.sitemapUrls || []
+      const toCrawl = []
+
+      if (sitemapUrls.length === 0) {
+        sitemapUrls.push(pathJoin("https://" + domain, "sitemap.xml"))
+        sitemapUrls.push(pathJoin("https://" + domain, "sitemap.txt"))
+      }
+
+      for (const sitemapUrl of sitemapUrls) {
+        const response = await fetch(sitemapUrl)
+
+        if (response.status === 200) {
+          const raw = await response.text()
+
+          if (sitemapUrl.toLowerCase().endsWith(".xml")) {
+            const dom = new JSDOM(raw, { contentType: "text/xml" })
+
+            const childNodes = Array.from(
+              dom.window.document.documentElement.childNodes,
+            )
+
+            for (const child of childNodes) {
+              try {
+                const loc = child.querySelector("loc").innerHTML
+                toCrawl.push(loc)
+              } catch (e) {
+                // ...
+              }
+            }
+          }
+
+          if (sitemapUrl.toLowerCase().endsWith(".txt")) {
+            raw
+              .split("\n")
+              .map(v => v.trim())
+              .filter(v => v.length > 0)
+              .forEach(v => toCrawl.push(v))
+          }
+        } else {
+          this.emit(
+            "error",
+            `Error fetching sitemap: (${response.status}) ${sitemapUrl}`,
+          )
+        }
+      }
+
+      return toCrawl
+    })()
+
+    this.domainConfigs[domain] = config
+    toCrawl.forEach(url => this.frontier.push(url))
+    return this
+  }
+
   emit(channel, payload) {
     this.subscriptions[channel].forEach(callback => callback(payload))
     return this
@@ -74,77 +150,13 @@ class WebCrawler {
     this.isPaused = false
     this.emit("start")
 
-    url = url instanceof URL ? url.toString() : url
+    if (typeof url !== "string") {
+      throw new Error(
+        "The value passed into the `start` method must be a URL in string form!",
+      )
+    }
 
-    // fetch and parse robots.txt from the start domain
-    await (async () => {
-      const { protocol, hostname } = new URL(url)
-      const robotsUrl = pathJoin(protocol + "//" + hostname, "robots.txt")
-      const response = await fetch(robotsUrl)
-
-      if (response.status === 200) {
-        const raw = await response.text()
-        const config = RobotsConfig.parse(raw)
-        this.domainConfigs[hostname] = config
-      } else {
-        this.emit(
-          "warn",
-          `No robots.txt file was found for the domain "${hostname}"!`,
-        )
-
-        this.domainConfigs[hostname] = new RobotsConfig()
-      }
-    })()
-
-    // fetch and parse sitemap(s)
-    await (async () => {
-      const { protocol, hostname } = new URL(url)
-      const config = this.domainConfigs[hostname]
-      const sitemapUrls = config.sitemapUrls || []
-
-      if (sitemapUrls.length === 0) {
-        sitemapUrls.push(pathJoin(protocol + "//" + hostname, "sitemap.xml"))
-        sitemapUrls.push(pathJoin(protocol + "//" + hostname, "sitemap.txt"))
-      }
-
-      for (const sitemapUrl of sitemapUrls) {
-        const response = await fetch(sitemapUrl)
-
-        if (response.status === 200) {
-          const raw = await response.text()
-
-          if (sitemapUrl.toLowerCase().endsWith(".xml")) {
-            const dom = new JSDOM(raw, { contentType: "text/xml" })
-
-            const childNodes = Array.from(
-              dom.window.document.documentElement.childNodes,
-            )
-
-            for (const child of childNodes) {
-              try {
-                const loc = child.querySelector("loc").innerHTML
-                this.frontier.push(loc)
-              } catch (e) {
-                // ...
-              }
-            }
-          }
-
-          if (sitemapUrl.toLowerCase().endsWith(".txt")) {
-            raw
-              .split("\n")
-              .map(v => v.trim())
-              .filter(v => v.length > 0)
-              .forEach(v => this.frontier.push(v))
-          }
-        } else {
-          this.emit(
-            "error",
-            `Error fetching sitemap: (${response.status}) ${sitemapUrl}`,
-          )
-        }
-      }
-    })()
+    await this.createDomainConfiguration(new URL(url).hostname)
 
     return this
   }
