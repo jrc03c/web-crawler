@@ -4,6 +4,7 @@
 // the latter should be standardized into the full URL:
 // "https://example.com/foo/bar/hello/world".
 
+const extensions = require("./extensions.json")
 const pathJoin = require("./path-join")
 
 function absolutifyUrl(currentUrl, targetUrl) {
@@ -18,9 +19,11 @@ function absolutifyUrl(currentUrl, targetUrl) {
 
   const temp = new URL(currentUrl)
 
-  return (
-    temp.protocol + "//" + pathJoin(temp.hostname, temp.pathname, targetUrl)
-  )
+  const updatedPath = extensions.some(ext => temp.pathname.includes("." + ext))
+    ? temp.pathname.split("/").slice(0, -1).join("/")
+    : temp.pathname
+
+  return temp.protocol + "//" + pathJoin(temp.hostname, updatedPath, targetUrl)
 }
 
 module.exports = absolutifyUrl
