@@ -1,19 +1,24 @@
+const { hash } = require("@jrc03c/js-crypto-helpers")
 const { JSDOM } = require("jsdom")
+const absolutifyUrl = require("./helpers/absolutify-url")
+const FileDB = require("@jrc03c/filedb")
 const pathJoin = require("./helpers/path-join")
+const pause = require("@jrc03c/pause")
 const RobotsConfig = require("./helpers/robots-config")
 
 class WebCrawler {
+  db = null
   delay = 100
   domainConfigs = {}
   filter = () => true
   frontier = []
   isCrawling = false
   isPaused = false
-  logs = []
   subscriptions = {}
   visited = []
 
   constructor(options) {
+    this.db = new FileDB(options.dir)
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
   }
@@ -21,7 +26,7 @@ class WebCrawler {
   async createDomainConfiguration(domain) {
     // fetch and parse robots.txt
     const config = await (async () => {
-      const robotsUrl = pathJoin("https://" + domain, "robots.txt")
+      const robotsUrl = "https://" + pathJoin(domain, "robots.txt")
       const response = await fetch(robotsUrl)
 
       if (response.status === 200) {
@@ -44,8 +49,8 @@ class WebCrawler {
       const toCrawl = []
 
       if (sitemapUrls.length === 0) {
-        sitemapUrls.push(pathJoin("https://" + domain, "sitemap.xml"))
-        sitemapUrls.push(pathJoin("https://" + domain, "sitemap.txt"))
+        sitemapUrls.push("https://" + pathJoin(domain, "sitemap.xml"))
+        sitemapUrls.push("https://" + pathJoin(domain, "sitemap.txt"))
       }
 
       for (const sitemapUrl of sitemapUrls) {
@@ -91,11 +96,16 @@ class WebCrawler {
 
     this.domainConfigs[domain] = config
     toCrawl.forEach(url => this.frontier.push(url))
+    this.db.writeSync("/domain-configs/" + domain, config)
+    this.db.writeSync("/frontier", this.frontier)
     return this
   }
 
   emit(channel, payload) {
-    this.subscriptions[channel].forEach(callback => callback(payload))
+    if (this.subscriptions[channel]) {
+      this.subscriptions[channel].forEach(callback => callback(payload))
+    }
+
     return this
   }
 
@@ -157,6 +167,73 @@ class WebCrawler {
     }
 
     await this.createDomainConfiguration(new URL(url).hostname)
+    this.frontier.push(url)
+
+    while (this.frontier.length > 0) {
+      const url = this.frontier.shift()
+
+      if (this.visited.includes(url)) {
+        continue
+      }
+
+      this.visited.push(url)
+      this.db.writeSync("/frontier", this.frontier)
+      this.db.writeSync("/visited", this.visited)
+
+      if (!this.filter(url)) {
+        continue
+      }
+
+      const domain = new URL(url).hostname
+      const config = this.domainConfigs[domain]
+
+      if (!config) {
+        await this.createDomainConfiguration(domain)
+      }
+
+      if (!config.isAllowed("*", new URL(url).pathname)) {
+        continue
+      }
+
+      const response = await fetch(url)
+
+      if (response.status === 200) {
+        const xRobotsTag = response.headers.get("x-robots-tag")
+
+        if (xRobotsTag && xRobotsTag === "noindex") {
+          continue
+        }
+
+        const raw = await response.text()
+
+        try {
+          const dom = new JSDOM(raw)
+          const metas = Array.from(dom.window.document.querySelectorAll("meta"))
+          const meta = metas.find(meta => meta.name === "robots")
+
+          if (meta && meta.content.includes("noindex")) {
+            continue
+          }
+
+          const key = await hash(url)
+
+          this.db.writeSync("/index/" + key, {
+            lastCrawlDate: new Date().toJSON(),
+            raw,
+          })
+
+          const anchors = Array.from(dom.window.document.querySelectorAll("a"))
+          anchors.forEach(a => this.frontier.push(absolutifyUrl(url, a.href)))
+          this.db.writeSync("/frontier", this.frontier)
+          this.emit("crawl", url)
+          await pause(this.delay)
+        } catch (e) {
+          // ...
+        }
+      } else {
+        this.emit("error", `Error fetching URL: (${response.status}) ${url}`)
+      }
+    }
 
     return this
   }
