@@ -12,6 +12,10 @@ function absolutifyUrl(currentUrl, targetUrl) {
     return targetUrl
   }
 
+  if (targetUrl.startsWith("//")) {
+    return new URL(currentUrl).protocol + targetUrl
+  }
+
   if (targetUrl.startsWith("/")) {
     const temp = new URL(currentUrl)
     return temp.protocol + "//" + pathJoin(temp.hostname, targetUrl)
