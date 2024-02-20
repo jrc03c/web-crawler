@@ -1,8 +1,5 @@
-const { copy } = require("@jrc03c/js-math-tools")
-const { hash } = require("@jrc03c/js-crypto-helpers")
 const { JSDOM } = require("jsdom")
 const absolutifyUrl = require("./helpers/absolutify-url")
-const FileDB = require("@jrc03c/filedb")
 const fs = require("node:fs")
 const Logger = require("@jrc03c/logger")
 const pathJoin = require("./helpers/path-join")
@@ -10,7 +7,7 @@ const pause = require("@jrc03c/pause")
 const RobotsConfig = require("./helpers/robots-config")
 
 class WebCrawler {
-  db = null
+  defaultPageTTL = 1000 * 60 * 60 * 24 // 24 hours
   delay = 100
   domainConfigs = {}
   filter = () => true
@@ -30,7 +27,11 @@ class WebCrawler {
       fs.mkdirSync(logsDir, { recursive: true })
     }
 
-    this.db = new FileDB(options.dir)
+    this.defaultPageTTL =
+      typeof options.defaultPageTTL === "undefined"
+        ? this.defaultPageTTL
+        : options.defaultPageTTL
+
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
     this.logger = new Logger({ path: logsDir })
@@ -118,17 +119,6 @@ class WebCrawler {
 
     this.domainConfigs[domain] = config
     toCrawl.forEach(url => this.frontier.push(url))
-
-    // NOTE: I'm stringifying the bot rules because FileDB didn't like writing
-    // asterisks as part of filesystem paths. So I need to be sure to parse
-    // the bot rules from their stringified form when loading the crawler's
-    // config from disk.
-    const tempConfig = copy(config)
-    tempConfig.botRules = JSON.stringify(tempConfig.botRules)
-
-    const key = await hash(domain)
-    this.db.writeSync("/domain-configs/" + key, tempConfig)
-    this.db.writeSync("/frontier", this.frontier)
     return config
   }
 
@@ -138,6 +128,14 @@ class WebCrawler {
     }
 
     return this
+  }
+
+  async getDomainConfiguration(domain) {
+    if (this.domainConfigs[domain]) {
+      return this.domainConfigs[domain]
+    } else {
+      return await this.createDomainConfiguration(domain)
+    }
   }
 
   off(channel, callback) {
@@ -209,15 +207,12 @@ class WebCrawler {
         await pause(this.delay)
       }
 
+      // Get the next URL on the frontier.
       const url = this.frontier.shift()
 
-      if (this.visited.includes(url)) {
-        continue
-      }
+      // Check to see if the URL has been crawled recently. If so, skip it.
 
       this.visited.push(url)
-      this.db.writeSync("/frontier", this.frontier)
-      this.db.writeSync("/visited", this.visited)
 
       if (!this.filter(url)) {
         continue
@@ -267,13 +262,6 @@ class WebCrawler {
             }
           }
 
-          const key = await hash(url)
-
-          this.db.writeSync("/index/" + key, {
-            updated: new Date().toJSON(),
-            raw,
-          })
-
           if (!this.shouldOnlyFollowSitemap) {
             const anchors = Array.from(
               dom.window.document.querySelectorAll("a"),
@@ -282,7 +270,6 @@ class WebCrawler {
             anchors.forEach(a => this.frontier.push(absolutifyUrl(url, a.href)))
           }
 
-          this.db.writeSync("/frontier", this.frontier)
           this.emit("crawl", { dom, raw, url })
           this.logger.logInfo(`Crawled URL: ${url}`)
           await pause(this.delay)
