@@ -1,3 +1,6 @@
+// NOTE: The `sitemapUrls` property of this class refers to URLs at which
+// sitemaps are located, not URLs contained within sitemaps!
+
 class RobotsConfig {
   botRules = {}
   sitemapUrls = []

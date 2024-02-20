@@ -16,6 +16,8 @@ class WebCrawler {
   isCrawling = false
   isPaused = false
   logger = null
+  shouldHonorBotRules = true
+  shouldOnlyFollowSitemap = true
   subscriptions = {}
   visited = []
 
@@ -24,6 +26,16 @@ class WebCrawler {
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
     this.logger = new Logger({ path: pathJoin(options.dir, "logs") })
+
+    this.shouldHonorBotRules =
+      typeof options.shouldHonorBotRules === "undefined"
+        ? this.shouldHonorBotRules
+        : options.shouldHonorBotRules
+
+    this.shouldOnlyFollowSitemap =
+      typeof options.shouldOnlyFollowSitemap === "undefined"
+        ? this.shouldOnlyFollowSitemap
+        : options.shouldOnlyFollowSitemap
   }
 
   async createDomainConfiguration(domain) {
@@ -201,41 +213,58 @@ class WebCrawler {
         await this.createDomainConfiguration(domain)
       }
 
-      if (!config.isAllowed("*", new URL(url).pathname)) {
+      if (
+        this.shouldHonorBotRules &&
+        !config.isAllowed("*", new URL(url).pathname)
+      ) {
         continue
       }
 
       const response = await fetch(url)
 
       if (response.status === 200) {
-        const xRobotsTag = response.headers.get("x-robots-tag")
+        if (this.shouldHonorBotRules) {
+          const xRobotsTag = response.headers.get("x-robots-tag")
 
-        if (xRobotsTag && xRobotsTag === "noindex") {
-          await pause(this.delay)
-          continue
+          if (xRobotsTag && xRobotsTag === "noindex") {
+            await pause(this.delay)
+            continue
+          }
         }
 
         const raw = await response.text()
 
         try {
           const dom = new JSDOM(raw)
-          const metas = Array.from(dom.window.document.querySelectorAll("meta"))
-          const meta = metas.find(meta => meta.name === "robots")
 
-          if (meta && meta.content.includes("noindex")) {
-            await pause(this.delay)
-            continue
+          if (this.shouldHonorBotRules) {
+            const metas = Array.from(
+              dom.window.document.querySelectorAll("meta"),
+            )
+
+            const meta = metas.find(meta => meta.name === "robots")
+
+            if (meta && meta.content.includes("noindex")) {
+              await pause(this.delay)
+              continue
+            }
           }
 
           const key = await hash(url)
 
           this.db.writeSync("/index/" + key, {
-            lastCrawlDate: new Date().toJSON(),
+            updated: new Date().toJSON(),
             raw,
           })
 
-          const anchors = Array.from(dom.window.document.querySelectorAll("a"))
-          anchors.forEach(a => this.frontier.push(absolutifyUrl(url, a.href)))
+          if (!this.shouldOnlyFollowSitemap) {
+            const anchors = Array.from(
+              dom.window.document.querySelectorAll("a"),
+            )
+
+            anchors.forEach(a => this.frontier.push(absolutifyUrl(url, a.href)))
+          }
+
           this.db.writeSync("/frontier", this.frontier)
           this.emit("crawl", { dom, raw, url })
           this.logger.logInfo(`Crawled URL: ${url}`)
