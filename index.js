@@ -2,6 +2,7 @@ const { hash } = require("@jrc03c/js-crypto-helpers")
 const { JSDOM } = require("jsdom")
 const absolutifyUrl = require("./helpers/absolutify-url")
 const FileDB = require("@jrc03c/filedb")
+const Logger = require("@jrc03c/logger")
 const pathJoin = require("./helpers/path-join")
 const pause = require("@jrc03c/pause")
 const RobotsConfig = require("./helpers/robots-config")
@@ -14,6 +15,7 @@ class WebCrawler {
   frontier = []
   isCrawling = false
   isPaused = false
+  logger = null
   subscriptions = {}
   visited = []
 
@@ -21,6 +23,7 @@ class WebCrawler {
     this.db = new FileDB(options.dir)
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
+    this.logger = new Logger({ path: pathJoin(options.dir, "logs") })
   }
 
   async createDomainConfiguration(domain) {
@@ -34,11 +37,10 @@ class WebCrawler {
         const config = RobotsConfig.parse(raw)
         return config
       } else {
-        this.emit(
-          "warn",
-          `No robots.txt file was found for the domain "${domain}"!`,
-        )
+        const message = `No robots.txt file was found for the domain "${domain}"!`
 
+        this.emit("warn", message)
+        this.logger.logWarning(message)
         return new RobotsConfig()
       }
     })()
@@ -84,10 +86,10 @@ class WebCrawler {
               .forEach(v => toCrawl.push(v))
           }
         } else {
-          this.emit(
-            "error",
-            `Error fetching sitemap: (${response.status}) ${sitemapUrl}`,
-          )
+          const message = `Error fetching sitemap: (${response.status}) ${sitemapUrl}`
+
+          this.emit("error", message)
+          this.logger.logError(message)
         }
       }
 
@@ -133,6 +135,7 @@ class WebCrawler {
   pause() {
     this.isPaused = true
     this.emit("pause")
+    this.logger.logInfo("Paused.")
     return this
   }
 
@@ -159,17 +162,24 @@ class WebCrawler {
     this.isCrawling = true
     this.isPaused = false
     this.emit("start")
+    this.logger.logInfo("Started!")
 
-    if (typeof url !== "string") {
-      throw new Error(
-        "The value passed into the `start` method must be a URL in string form!",
-      )
+    if (url) {
+      if (typeof url !== "string") {
+        throw new Error(
+          "The value passed into the `start` method must be a URL in string form!",
+        )
+      }
+
+      await this.createDomainConfiguration(new URL(url).hostname)
+      this.frontier.push(url)
     }
 
-    await this.createDomainConfiguration(new URL(url).hostname)
-    this.frontier.push(url)
-
     while (this.frontier.length > 0) {
+      while (this.isPaused) {
+        await pause(this.delay)
+      }
+
       const url = this.frontier.shift()
 
       if (this.visited.includes(url)) {
@@ -201,6 +211,7 @@ class WebCrawler {
         const xRobotsTag = response.headers.get("x-robots-tag")
 
         if (xRobotsTag && xRobotsTag === "noindex") {
+          await pause(this.delay)
           continue
         }
 
@@ -212,6 +223,7 @@ class WebCrawler {
           const meta = metas.find(meta => meta.name === "robots")
 
           if (meta && meta.content.includes("noindex")) {
+            await pause(this.delay)
             continue
           }
 
@@ -225,16 +237,25 @@ class WebCrawler {
           const anchors = Array.from(dom.window.document.querySelectorAll("a"))
           anchors.forEach(a => this.frontier.push(absolutifyUrl(url, a.href)))
           this.db.writeSync("/frontier", this.frontier)
-          this.emit("crawl", url)
+          this.emit("crawl", { dom, raw, url })
+          this.logger.logInfo(`Crawled URL: ${url}`)
           await pause(this.delay)
         } catch (e) {
-          // ...
+          const message = `Error processing contents of URL: (${url}) ${e}`
+          this.emit("error", message)
+          this.logger.logError(message)
         }
       } else {
-        this.emit("error", `Error fetching URL: (${response.status}) ${url}`)
+        const message = `Error fetching URL: (${response.status}) ${url}`
+        this.emit("error", message)
+        this.logger.logError(message)
       }
     }
 
+    this.isCrawling = false
+    this.isPaused = false
+    this.emit("finish")
+    this.logger.logSuccess("Finished!")
     return this
   }
 
@@ -242,6 +263,7 @@ class WebCrawler {
     this.isCrawling = false
     this.isPaused = false
     this.emit("stop")
+    this.logger.logInfo("Stopped.")
     return this
   }
 }
