@@ -1,10 +1,13 @@
-const { JSDOM } = require("jsdom")
+const { JSDOM, VirtualConsole } = require("jsdom")
 const absolutifyUrl = require("./helpers/absolutify-url")
 const fs = require("node:fs")
 const Logger = require("@jrc03c/logger")
 const pathJoin = require("./helpers/path-join")
 const pause = require("@jrc03c/pause")
 const RobotsConfig = require("./helpers/robots-config")
+
+const virtualConsole = new VirtualConsole()
+virtualConsole.on("error", () => {})
 
 class WebCrawler {
   defaultPageTTL = 1000 * 60 * 60 * 24 // 24 hours
@@ -68,34 +71,47 @@ class WebCrawler {
 
     // fetch and parse sitemap(s)
     const toCrawl = await (async () => {
-      const sitemapUrls = config.sitemapUrls || []
-      const toCrawl = []
-
-      if (sitemapUrls.length === 0) {
-        sitemapUrls.push("https://" + pathJoin(domain, "sitemap.xml"))
-        sitemapUrls.push("https://" + pathJoin(domain, "sitemap.txt"))
+      if (config.sitemapUrls.length === 0) {
+        config.sitemapUrls.push("https://" + pathJoin(domain, "sitemap.xml"))
+        config.sitemapUrls.push("https://" + pathJoin(domain, "sitemap.txt"))
       }
 
-      for (const sitemapUrl of sitemapUrls) {
+      const toCrawl = []
+
+      for (const sitemapUrl of config.sitemapUrls) {
         const response = await fetch(sitemapUrl)
 
         if (response.status === 200) {
           const raw = await response.text()
 
           if (sitemapUrl.toLowerCase().endsWith(".xml")) {
-            const dom = new JSDOM(raw, { contentType: "text/xml" })
+            try {
+              const dom = new JSDOM(raw, {
+                contentType: "text/xml",
+                virtualConsole,
+              })
 
-            const childNodes = Array.from(
-              dom.window.document.documentElement.childNodes,
-            )
+              const childNodes = Array.from(
+                dom.window.document.documentElement.childNodes,
+              )
 
-            for (const child of childNodes) {
-              try {
-                const loc = child.querySelector("loc").innerHTML
-                toCrawl.push(loc)
-              } catch (e) {
-                // ...
+              for (const child of childNodes) {
+                try {
+                  const loc = child.querySelector("loc").innerHTML
+                  toCrawl.push(loc)
+                } catch (e) {
+                  // ...
+                }
               }
+            } catch (e) {
+              const message = `Error parsing sitemap: (${sitemapUrl}) ${e}`
+              this.emit("error", message)
+              this.logger.logError(message)
+
+              config.sitemapUrls.splice(
+                config.sitemapUrls.indexOf(sitemapUrl),
+                1,
+              )
             }
           }
 
@@ -111,6 +127,7 @@ class WebCrawler {
 
           this.emit("error", message)
           this.logger.logError(message)
+          config.sitemapUrls.splice(config.sitemapUrls.indexOf(sitemapUrl), 1)
         }
       }
 
@@ -198,7 +215,8 @@ class WebCrawler {
         )
       }
 
-      await this.createDomainConfiguration(new URL(url).hostname)
+      const config = await this.createDomainConfiguration(new URL(url).hostname)
+      fs.writeFileSync("temp-config.json", JSON.stringify(config), "utf8")
       this.frontier.push(url)
     }
 
@@ -210,12 +228,14 @@ class WebCrawler {
       const url = this.frontier.shift()
 
       if (this.visited.indexOf(url) > -1) {
+        this.logger.logInfo(`URL already visited or filtered: ${url}`)
         continue
       }
 
       this.visited.push(url)
 
       if (!this.filter(url)) {
+        this.logger.logInfo(`URL did not pass through filter: ${url}`)
         continue
       }
 
@@ -230,6 +250,7 @@ class WebCrawler {
         this.shouldHonorBotRules &&
         !config.isAllowed("*", new URL(url).pathname)
       ) {
+        this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
         continue
       }
 
@@ -240,6 +261,7 @@ class WebCrawler {
           const xRobotsTag = response.headers.get("x-robots-tag")
 
           if (xRobotsTag && xRobotsTag === "noindex") {
+            this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
             await pause(this.delay)
             continue
           }
@@ -248,7 +270,7 @@ class WebCrawler {
         const raw = await response.text()
 
         try {
-          const dom = new JSDOM(raw)
+          const dom = new JSDOM(raw, { virtualConsole })
 
           if (this.shouldHonorBotRules) {
             const metas = Array.from(
@@ -258,12 +280,16 @@ class WebCrawler {
             const meta = metas.find(meta => meta.name === "robots")
 
             if (meta && meta.content.includes("noindex")) {
+              this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
               await pause(this.delay)
               continue
             }
           }
 
-          if (!this.shouldOnlyFollowSitemap) {
+          if (
+            !this.shouldOnlyFollowSitemap ||
+            config.sitemapUrls.length === 0
+          ) {
             const anchors = Array.from(
               dom.window.document.querySelectorAll("a"),
             )

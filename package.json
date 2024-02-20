@@ -15,6 +15,7 @@
     "prettier": "^3.2.1"
   },
   "dependencies": {
+    "@jrc03c/js-type-experiments": "^0.0.12",
     "@jrc03c/logger": "^0.0.10"
   }
 }
