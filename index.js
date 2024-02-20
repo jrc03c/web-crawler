@@ -1,7 +1,9 @@
+const { copy } = require("@jrc03c/js-math-tools")
 const { hash } = require("@jrc03c/js-crypto-helpers")
 const { JSDOM } = require("jsdom")
 const absolutifyUrl = require("./helpers/absolutify-url")
 const FileDB = require("@jrc03c/filedb")
+const fs = require("node:fs")
 const Logger = require("@jrc03c/logger")
 const pathJoin = require("./helpers/path-join")
 const pause = require("@jrc03c/pause")
@@ -22,10 +24,16 @@ class WebCrawler {
   visited = []
 
   constructor(options) {
+    const logsDir = pathJoin(options.dir, "logs")
+
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true })
+    }
+
     this.db = new FileDB(options.dir)
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
-    this.logger = new Logger({ path: pathJoin(options.dir, "logs") })
+    this.logger = new Logger({ path: logsDir })
 
     this.shouldHonorBotRules =
       typeof options.shouldHonorBotRules === "undefined"
@@ -110,9 +118,18 @@ class WebCrawler {
 
     this.domainConfigs[domain] = config
     toCrawl.forEach(url => this.frontier.push(url))
-    this.db.writeSync("/domain-configs/" + domain, config)
+
+    // NOTE: I'm stringifying the bot rules because FileDB didn't like writing
+    // asterisks as part of filesystem paths. So I need to be sure to parse
+    // the bot rules from their stringified form when loading the crawler's
+    // config from disk.
+    const tempConfig = copy(config)
+    tempConfig.botRules = JSON.stringify(tempConfig.botRules)
+
+    const key = await hash(domain)
+    this.db.writeSync("/domain-configs/" + key, tempConfig)
     this.db.writeSync("/frontier", this.frontier)
-    return this
+    return config
   }
 
   emit(channel, payload) {
@@ -207,10 +224,10 @@ class WebCrawler {
       }
 
       const domain = new URL(url).hostname
-      const config = this.domainConfigs[domain]
+      let config = this.domainConfigs[domain]
 
       if (!config) {
-        await this.createDomainConfiguration(domain)
+        config = await this.createDomainConfiguration(domain)
       }
 
       if (
