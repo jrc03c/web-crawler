@@ -207,10 +207,11 @@ class WebCrawler {
         await pause(this.delay)
       }
 
-      // Get the next URL on the frontier.
       const url = this.frontier.shift()
 
-      // Check to see if the URL has been crawled recently. If so, skip it.
+      if (this.visited.indexOf(url) > -1) {
+        continue
+      }
 
       this.visited.push(url)
 
