@@ -40,6 +40,7 @@ test("tests that the `absolutifyUrl` function works as expected", () => {
       "//just-a-test.com/temp.png",
       "http://just-a-test.com/temp.png",
     ],
+    ["https://example.com/", "about:blank#foo", "https://example.com/#foo"],
   ]
 
   for (const check of checks) {

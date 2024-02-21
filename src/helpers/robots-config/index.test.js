@@ -32,21 +32,21 @@ test("test that the `RobotsConfig` class works as expected", () => {
     },
 
     Josh: {
-      allow: [new RegExp("/a/.*?/z")],
+      allow: [new RegExp("/a/(.*?)/z")],
       disallow: [new RegExp("/everything/under/the/sun"), new RegExp("/a/b/c")],
     },
 
     Spider: {
       allow: [
         new RegExp("/foo"),
-        new RegExp("/bar/baz/.*?"),
+        new RegExp("/bar/baz/(.*?)"),
         new RegExp("/why/because"),
       ],
 
       disallow: [
         new RegExp("/why/"),
         new RegExp("/nope/nope/nope"),
-        new RegExp("/images/.*?\\.png"),
+        new RegExp("/images/(.*?)\\.png"),
       ],
     },
   }

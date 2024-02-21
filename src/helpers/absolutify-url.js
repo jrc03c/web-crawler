@@ -8,6 +8,9 @@ const extensions = require("./extensions.json")
 const pathJoin = require("./path-join")
 
 function absolutifyUrl(currentUrl, targetUrl) {
+  currentUrl = currentUrl.replace("about:blank", "")
+  targetUrl = targetUrl.replace("about:blank", "")
+
   if (targetUrl.includes("://")) {
     return targetUrl
   }

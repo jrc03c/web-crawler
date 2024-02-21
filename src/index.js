@@ -38,6 +38,7 @@ class WebCrawler {
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
     this.logger = new Logger({ path: logsDir })
+    this.logger.load()
 
     this.shouldHonorBotRules =
       typeof options.shouldHonorBotRules === "undefined"
@@ -63,7 +64,7 @@ class WebCrawler {
       } else {
         const message = `No robots.txt file was found for the domain "${domain}"!`
 
-        this.emit("warn", message)
+        this.emit("warn", { domain, message })
         this.logger.logWarning(message)
         return new RobotsConfig()
       }
@@ -105,7 +106,7 @@ class WebCrawler {
               }
             } catch (e) {
               const message = `Error parsing sitemap: (${sitemapUrl}) ${e}`
-              this.emit("error", message)
+              this.emit("error", { message, sitemapUrl })
               this.logger.logError(message)
 
               config.sitemapUrls.splice(
@@ -125,7 +126,7 @@ class WebCrawler {
         } else {
           const message = `Error fetching sitemap: (${response.status}) ${sitemapUrl}`
 
-          this.emit("error", message)
+          this.emit("error", { message, response, sitemapUrl })
           this.logger.logError(message)
           config.sitemapUrls.splice(config.sitemapUrls.indexOf(sitemapUrl), 1)
         }
@@ -254,60 +255,86 @@ class WebCrawler {
         continue
       }
 
-      const response = await fetch(url)
+      try {
+        const response = await fetch(url)
+        this.emit("fetch", { response, url })
 
-      if (response.status === 200) {
-        if (this.shouldHonorBotRules) {
-          const xRobotsTag = response.headers.get("x-robots-tag")
-
-          if (xRobotsTag && xRobotsTag === "noindex") {
-            this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
-            await pause(this.delay)
-            continue
-          }
-        }
-
-        const raw = await response.text()
-
-        try {
-          const dom = new JSDOM(raw, { virtualConsole })
-
+        if (response.status === 200) {
           if (this.shouldHonorBotRules) {
-            const metas = Array.from(
-              dom.window.document.querySelectorAll("meta"),
-            )
+            const xRobotsTag = response.headers.get("x-robots-tag")
 
-            const meta = metas.find(meta => meta.name === "robots")
-
-            if (meta && meta.content.includes("noindex")) {
+            if (xRobotsTag && xRobotsTag === "noindex") {
               this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
               await pause(this.delay)
               continue
             }
           }
 
-          if (
-            !this.shouldOnlyFollowSitemap ||
-            config.sitemapUrls.length === 0
-          ) {
-            const anchors = Array.from(
-              dom.window.document.querySelectorAll("a"),
-            )
+          const raw = await response.text()
 
-            anchors.forEach(a => this.frontier.push(absolutifyUrl(url, a.href)))
+          try {
+            const dom = new JSDOM(raw, { virtualConsole })
+
+            if (this.shouldHonorBotRules) {
+              const metas = Array.from(
+                dom.window.document.querySelectorAll("meta"),
+              )
+
+              const meta = metas.find(meta => meta.name === "robots")
+
+              if (meta && meta.content.includes("noindex")) {
+                this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
+                await pause(this.delay)
+                continue
+              }
+            }
+
+            if (
+              !this.shouldOnlyFollowSitemap ||
+              config.sitemapUrls.length === 0
+            ) {
+              const anchors = Array.from(
+                dom.window.document.querySelectorAll("a"),
+              )
+
+              anchors.forEach(a => {
+                const newUrl = absolutifyUrl(url, a.href)
+
+                if (newUrl.includes("about:blank")) {
+                  this.logger.shouldWriteToStdout = true
+
+                  this.logger.logWarning(
+                    `This partial URL was converted into a URL containing "about:blank": ${a.href} (page: ${url}, result: ${newUrl})`,
+                  )
+
+                  this.logger.shouldWriteToStdout = false
+                }
+
+                if (
+                  this.frontier.indexOf(newUrl) < 0 &&
+                  this.visited.indexOf(newUrl) < 0
+                ) {
+                  this.frontier.push(newUrl)
+                }
+              })
+            }
+
+            this.emit("crawl", { dom, raw, url })
+            this.logger.logInfo(`Crawled URL: ${url}`)
+            await pause(this.delay)
+          } catch (e) {
+            const message = `Error processing contents of URL: (${url}) ${e}`
+            this.emit("error", { message, url })
+            this.logger.logError(message)
           }
-
-          this.emit("crawl", { dom, raw, url })
-          this.logger.logInfo(`Crawled URL: ${url}`)
-          await pause(this.delay)
-        } catch (e) {
-          const message = `Error processing contents of URL: (${url}) ${e}`
-          this.emit("error", message)
+        } else {
+          const message = `Error fetching URL: (${response.status}) ${url}`
+          this.emit("error", { message, response, url })
           this.logger.logError(message)
         }
-      } else {
-        const message = `Error fetching URL: (${response.status}) ${url}`
-        this.emit("error", message)
+      } catch (e) {
+        const message = `Error fetching URL: (${url}) ${e}`
+        this.emit("error", { message, url })
         this.logger.logError(message)
       }
     }
