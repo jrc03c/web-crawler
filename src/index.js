@@ -150,7 +150,12 @@ class WebCrawler {
     })()
 
     this.domainConfigs[domain] = config
-    toCrawl.forEach(url => this.frontier.push(url))
+
+    toCrawl.forEach(url => {
+      this.frontier.push(url)
+      this.emit("url-added", url)
+    })
+
     return config
   }
 
@@ -233,6 +238,7 @@ class WebCrawler {
       const config = await this.createDomainConfiguration(new URL(url).hostname)
       fs.writeFileSync("temp-config.json", JSON.stringify(config), "utf8")
       this.frontier.push(url)
+      this.emit("url-added", url)
     }
 
     while (this.frontier.length > 0) {
@@ -326,6 +332,7 @@ class WebCrawler {
                   this.visited.indexOf(newUrl) < 0
                 ) {
                   this.frontier.push(newUrl)
+                  this.emit("url-added", newUrl)
                 }
               })
             }
