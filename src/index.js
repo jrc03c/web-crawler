@@ -293,6 +293,10 @@ class WebCrawler {
           const raw = await response.text()
 
           try {
+            // NOTE: This `try` block currently implies that we're always
+            // crawling HTML pages; but that may not always be true! Do we want
+            // to cache, for example, the contents of JS or CSS files? If so,
+            // then we need to rework this block.
             const dom = new JSDOM(raw, { virtualConsole })
 
             if (this.shouldHonorBotRules) {
