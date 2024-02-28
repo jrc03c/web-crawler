@@ -1,3 +1,4 @@
+const { flatten } = require("@jrc03c/js-math-tools")
 const { JSDOM, VirtualConsole } = require("jsdom")
 const absolutifyUrl = require("./helpers/absolutify-url")
 const fs = require("node:fs")
@@ -8,6 +9,19 @@ const RobotsConfig = require("./helpers/robots-config")
 
 const virtualConsole = new VirtualConsole()
 virtualConsole.on("error", () => {})
+
+function getAllElements(dom, root) {
+  root = root || dom.window.document.body
+  const out = [root]
+
+  if (root.children) {
+    Array.from(root.children).forEach(child => {
+      out.push(...getAllElements(dom, child))
+    })
+  }
+
+  return flatten(out)
+}
 
 class WebCrawler {
   defaultPageTTL = 1000 * 60 * 60 * 24 // 24 hours
@@ -293,18 +307,15 @@ class WebCrawler {
               !this.shouldOnlyFollowSitemap ||
               config.sitemapUrls.length === 0
             ) {
-              const anchors = Array.from(
-                dom.window.document.querySelectorAll("a"),
-              )
-
-              anchors.forEach(a => {
-                const newUrl = absolutifyUrl(url, a.href)
+              getAllElements(dom).forEach(el => {
+                if (!el.href && !el.src) return
+                const newUrl = absolutifyUrl(url, el.href || el.src)
 
                 if (newUrl.includes("about:blank")) {
                   this.logger.shouldWriteToStdout = true
 
                   this.logger.logWarning(
-                    `This partial URL was converted into a URL containing "about:blank": ${a.href} (page: ${url}, result: ${newUrl})`,
+                    `This partial URL was converted into a URL containing "about:blank": ${el.href} (page: ${url}, result: ${newUrl})`,
                   )
 
                   this.logger.shouldWriteToStdout = false
