@@ -1,8 +1,11 @@
 // NOTE: The `sitemapUrls` property of this class refers to URLs at which
 // sitemaps are located, not URLs contained within sitemaps!
 
+const { stringify } = require("@jrc03c/js-text-tools")
+
 class RobotsConfig {
   botRules = {}
+  raw = ""
   sitemapUrls = []
 
   static parse(raw) {
@@ -12,8 +15,14 @@ class RobotsConfig {
         : new RegExp(rule.replaceAll(".", "\\.").replaceAll("*", "(.*?)"))
     }
 
-    const lines = raw.split("\n").filter(line => !line.startsWith("#"))
+    const lines = raw
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && !line.match(/^\s*?#/g))
+
     const config = new RobotsConfig()
+    config.raw = raw
+
     let agent = null
 
     for (const line of lines) {
@@ -80,19 +89,26 @@ class RobotsConfig {
   }
 
   toString() {
-    return [this.sitemapUrls.map(url => "Sitemap: " + url)]
-      .concat(
-        Object.keys(this.botRules)
-          .toSorted()
-          .map(bot =>
-            ["User-agent: " + bot]
-              .concat(this.botRules[bot].allow.map(path => "Allow: " + path))
-              .concat(
-                this.botRules[bot].disallow.map(path => "Disallow: " + path),
-              ),
-          ),
-      )
-      .join("\n")
+    const botRulesOut = {}
+
+    Object.keys(this.botRules).forEach(agent => {
+      botRulesOut[agent] = {}
+
+      Object.keys(this.botRules[agent]).forEach(key => {
+        botRulesOut[agent][key] = this.botRules[agent][key].map(v =>
+          stringify(v),
+        )
+      })
+    })
+
+    return stringify(
+      {
+        botRules: botRulesOut,
+        raw: this.raw,
+        sitemapUrls: this.sitemapUrls,
+      },
+      ...arguments,
+    )
   }
 }
 
