@@ -2,7 +2,6 @@ const { flatten } = require("@jrc03c/js-math-tools")
 const { JSDOM, VirtualConsole } = require("jsdom")
 const absolutifyUrl = require("./helpers/absolutify-url")
 const fs = require("node:fs")
-const Logger = require("@jrc03c/logger")
 const pathJoin = require("./helpers/path-join")
 const pause = require("@jrc03c/pause")
 const RobotsConfig = require("./helpers/robots-config")
@@ -24,6 +23,27 @@ function getAllElements(dom, root) {
 }
 
 class WebCrawler {
+  static DisallowReasons = {
+    DISALLOWED_BY_BOT_RULES: "DISALLOWED_BY_BOT_RULES",
+    DISALLOWED_BY_META_TAG: "DISALLOWED_BY_META_TAG",
+    DISALLOWED_BY_RESPONSE_HEADER: "DISALLOWED_BY_RESPONSE_HEADER",
+  }
+
+  // lifecycle events:
+  // start
+  // warn
+  // error
+  // before-crawl
+  // fetch
+  // after-crawl
+  // add-url
+  // skip-url
+  // filter-url
+  // disallow-url
+  // pause
+  // stop
+  // finish
+
   defaultPageTTL = 1000 * 60 * 60 * 24 // 24 hours
   delay = 100
   domainConfigs = {}
@@ -31,7 +51,6 @@ class WebCrawler {
   frontier = []
   isCrawling = false
   isPaused = false
-  logger = null
   shouldHonorBotRules = true
   shouldOnlyFollowSitemap = true
   subscriptions = {}
@@ -51,8 +70,6 @@ class WebCrawler {
 
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
-    this.logger = new Logger({ path: logsDir })
-    this.logger.load()
 
     this.shouldHonorBotRules =
       typeof options.shouldHonorBotRules === "undefined"
@@ -79,7 +96,6 @@ class WebCrawler {
         const message = `No robots.txt file was found for the domain "${domain}"!`
 
         this.emit("warn", { domain, message })
-        this.logger.logWarning(message)
         return new RobotsConfig()
       }
     })()
@@ -120,8 +136,7 @@ class WebCrawler {
               }
             } catch (e) {
               const message = `Error parsing sitemap: (${sitemapUrl}) ${e}`
-              this.emit("error", { message, sitemapUrl })
-              this.logger.logError(message)
+              this.emit("error", { message, url: sitemapUrl })
 
               config.sitemapUrls.splice(
                 config.sitemapUrls.indexOf(sitemapUrl),
@@ -140,8 +155,7 @@ class WebCrawler {
         } else {
           const message = `Error fetching sitemap: (${response.status}) ${sitemapUrl}`
 
-          this.emit("error", { message, response, sitemapUrl })
-          this.logger.logError(message)
+          this.emit("error", { message, response, url: sitemapUrl })
           config.sitemapUrls.splice(config.sitemapUrls.indexOf(sitemapUrl), 1)
         }
       }
@@ -153,7 +167,7 @@ class WebCrawler {
 
     toCrawl.forEach(url => {
       this.frontier.push(url)
-      this.emit("url-added", url)
+      this.emit("add-url", { url })
     })
 
     return config
@@ -199,7 +213,6 @@ class WebCrawler {
   pause() {
     this.isPaused = true
     this.emit("pause")
-    this.logger.logInfo("Paused.")
     return this
   }
 
@@ -226,7 +239,6 @@ class WebCrawler {
     this.isCrawling = true
     this.isPaused = false
     this.emit("start")
-    this.logger.logInfo("Started!")
 
     if (url) {
       if (typeof url !== "string") {
@@ -238,7 +250,7 @@ class WebCrawler {
       const config = await this.createDomainConfiguration(new URL(url).hostname)
       fs.writeFileSync("temp-config.json", JSON.stringify(config), "utf8")
       this.frontier.push(url)
-      this.emit("url-added", url)
+      this.emit("add-url", { url })
     }
 
     while (this.frontier.length > 0) {
@@ -248,15 +260,15 @@ class WebCrawler {
 
       const url = this.frontier.shift()
 
-      if (this.visited.indexOf(url) > -1) {
-        this.logger.logInfo(`URL already visited or filtered: ${url}`)
+      if (this.visited.includes(url)) {
+        this.emit("skip-url", { url })
         continue
+      } else {
+        this.visited.push(url)
       }
 
-      this.visited.push(url)
-
       if (!this.filter(url)) {
-        this.logger.logInfo(`URL did not pass through filter: ${url}`)
+        this.emit("filter-url", { url })
         continue
       }
 
@@ -271,26 +283,35 @@ class WebCrawler {
         this.shouldHonorBotRules &&
         !config.isAllowed("*", new URL(url).pathname)
       ) {
-        this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
+        this.emit("disallow-url", {
+          reason: WebCrawler.DisallowReasons.DISALLOWED_BY_BOT_RULES,
+          url,
+        })
+
         continue
       }
 
       try {
+        this.emit("before-crawl", { url })
         const response = await fetch(url)
-        this.emit("fetch", { response, url })
+        const raw = await response.text()
+        this.emit("fetch", { raw, response, url })
 
         if (response.status === 200) {
           if (this.shouldHonorBotRules) {
             const xRobotsTag = response.headers.get("x-robots-tag")
 
             if (xRobotsTag && xRobotsTag === "noindex") {
-              this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
+              this.emit("disallow-url", {
+                reason:
+                  WebCrawler.DisallowReasons.DISALLOWED_BY_RESPONSE_HEADER,
+                url,
+              })
+
               await pause(this.delay)
               continue
             }
           }
-
-          const raw = await response.text()
 
           try {
             // NOTE: This `try` block currently implies that we're always
@@ -307,7 +328,11 @@ class WebCrawler {
               const meta = metas.find(meta => meta.name === "robots")
 
               if (meta && meta.content.includes("noindex")) {
-                this.logger.logInfo(`URL not allowed by bot rules: ${url}`)
+                this.emit("disallow-url", {
+                  reason: WebCrawler.DisallowReasons.DISALLOWED_BY_META_TAG,
+                  url,
+                })
+
                 await pause(this.delay)
                 continue
               }
@@ -321,50 +346,36 @@ class WebCrawler {
                 if (!el.href && !el.src) return
                 const newUrl = absolutifyUrl(url, el.href || el.src)
 
-                if (newUrl.includes("about:blank")) {
-                  this.logger.shouldWriteToStdout = true
-
-                  this.logger.logWarning(
-                    `This partial URL was converted into a URL containing "about:blank": ${el.href} (page: ${url}, result: ${newUrl})`,
-                  )
-
-                  this.logger.shouldWriteToStdout = false
-                }
-
                 if (
-                  this.frontier.indexOf(newUrl) < 0 &&
-                  this.visited.indexOf(newUrl) < 0
+                  !this.frontier.includes(newUrl) &&
+                  !this.visited.includes(newUrl) &&
+                  this.filter(newUrl)
                 ) {
                   this.frontier.push(newUrl)
-                  this.emit("url-added", newUrl)
+                  this.emit("add-url", { url: newUrl })
                 }
               })
             }
 
-            this.emit("crawl", { dom, raw, url })
-            this.logger.logInfo(`Crawled URL: ${url}`)
+            this.emit("after-crawl", { dom, raw, response, url })
             await pause(this.delay)
           } catch (e) {
             const message = `Error processing contents of URL: (${url}) ${e}`
             this.emit("error", { message, url })
-            this.logger.logError(message)
           }
         } else {
           const message = `Error fetching URL: (${response.status}) ${url}`
           this.emit("error", { message, response, url })
-          this.logger.logError(message)
         }
       } catch (e) {
         const message = `Error fetching URL: (${url}) ${e}`
         this.emit("error", { message, url })
-        this.logger.logError(message)
       }
     }
 
     this.isCrawling = false
     this.isPaused = false
     this.emit("finish")
-    this.logger.logSuccess("Finished!")
     return this
   }
 
@@ -372,7 +383,6 @@ class WebCrawler {
     this.isCrawling = false
     this.isPaused = false
     this.emit("stop")
-    this.logger.logInfo("Stopped.")
     return this
   }
 }

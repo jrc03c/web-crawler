@@ -6,6 +6,7 @@
     "@jrc03c/filedb": "^0.0.18",
     "@jrc03c/js-crypto-helpers": "^0.0.9",
     "@jrc03c/js-math-tools": "^0.0.61",
+    "@jrc03c/logger": "^0.0.10",
     "@jrc03c/make-key": "^0.0.14",
     "@jrc03c/pause": "^0.0.3",
     "eslint": "^8.56.0",
@@ -16,7 +17,6 @@
   },
   "dependencies": {
     "@jrc03c/js-text-tools": "^0.0.25",
-    "@jrc03c/js-type-experiments": "^0.0.12",
-    "@jrc03c/logger": "^0.0.10"
+    "@jrc03c/js-type-experiments": "^0.0.12"
   }
 }
