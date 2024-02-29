@@ -44,13 +44,13 @@ class WebCrawler {
   // stop
   // finish
 
-  defaultPageTTL = 1000 * 60 * 60 * 24 // 24 hours
   delay = 100
   domainConfigs = {}
   filter = () => true
   frontier = []
   isCrawling = false
   isPaused = false
+  requestTimeout = 3000
   shouldHonorBotRules = true
   shouldOnlyFollowSitemap = true
   subscriptions = {}
@@ -63,13 +63,9 @@ class WebCrawler {
       fs.mkdirSync(logsDir, { recursive: true })
     }
 
-    this.defaultPageTTL =
-      typeof options.defaultPageTTL === "undefined"
-        ? this.defaultPageTTL
-        : options.defaultPageTTL
-
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
+    this.requestTimeout = options.requestTimeout || this.requestTimeout
 
     this.shouldHonorBotRules =
       typeof options.shouldHonorBotRules === "undefined"
@@ -299,7 +295,16 @@ class WebCrawler {
 
       try {
         this.emit("before-crawl", { url })
-        const response = await fetch(url)
+        const controller = new AbortController()
+
+        const timeout = setTimeout(
+          () => controller.abort(),
+          this.requestTimeout,
+        )
+
+        const response = await fetch(url, { signal: controller.signal })
+        clearTimeout(timeout)
+
         const raw = await response.text()
         this.emit("fetch", { raw, response, url })
 
