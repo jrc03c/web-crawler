@@ -166,8 +166,14 @@ class WebCrawler {
     this.domainConfigs[domain] = config
 
     toCrawl.forEach(url => {
-      this.frontier.push(url)
-      this.emit("add-url", { url })
+      if (
+        !this.frontier.includes(url) &&
+        !this.visited.includes(url) &&
+        this.filter(url)
+      ) {
+        this.frontier.push(url)
+        this.emit("add-url", { url })
+      }
     })
 
     return config
@@ -247,10 +253,14 @@ class WebCrawler {
         )
       }
 
-      const config = await this.createDomainConfiguration(new URL(url).hostname)
-      fs.writeFileSync("temp-config.json", JSON.stringify(config), "utf8")
-      this.frontier.push(url)
-      this.emit("add-url", { url })
+      if (
+        !this.frontier.includes(url) &&
+        !this.visited.includes(url) &&
+        this.filter(url)
+      ) {
+        this.frontier.push(url)
+        this.emit("add-url", { url })
+      }
     }
 
     while (this.frontier.length > 0) {
@@ -273,11 +283,7 @@ class WebCrawler {
       }
 
       const domain = new URL(url).hostname
-      let config = this.domainConfigs[domain]
-
-      if (!config) {
-        config = await this.createDomainConfiguration(domain)
-      }
+      let config = await this.getDomainConfiguration(domain)
 
       if (
         this.shouldHonorBotRules &&
