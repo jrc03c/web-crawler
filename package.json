@@ -1,6 +1,6 @@
 {
   "name": "@jrc03c/web-crawler",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "src/index.js",
   "devDependencies": {
     "@jrc03c/filedb": "^0.0.18",
