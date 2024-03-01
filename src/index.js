@@ -78,6 +78,26 @@ class WebCrawler {
         : options.shouldOnlyFollowSitemap
   }
 
+  addUrlToFrontier(url, shouldSkipFilter) {
+    if (this.frontier.includes(url)) {
+      return false
+    }
+
+    if (this.visited.includes(url)) {
+      return false
+    }
+
+    if (!shouldSkipFilter) {
+      if (!this.filter(url)) {
+        return false
+      }
+    }
+
+    this.frontier.push(url)
+    this.emit("add-url", { url })
+    return true
+  }
+
   async createDomainConfiguration(domain) {
     // fetch and parse robots.txt
     const config = await (async () => {
@@ -160,18 +180,7 @@ class WebCrawler {
     })()
 
     this.domainConfigs[domain] = config
-
-    toCrawl.forEach(url => {
-      if (
-        !this.frontier.includes(url) &&
-        !this.visited.includes(url) &&
-        this.filter(url)
-      ) {
-        this.frontier.push(url)
-        this.emit("add-url", { url })
-      }
-    })
-
+    toCrawl.forEach(url => this.addUrlToFrontier(url))
     return config
   }
 
@@ -249,13 +258,9 @@ class WebCrawler {
         )
       }
 
-      if (
-        !this.frontier.includes(url) &&
-        !this.visited.includes(url) &&
-        this.filter(url)
-      ) {
-        this.frontier.push(url)
-        this.emit("add-url", { url })
+      if (!this.frontier.includes(url) && !this.visited.includes(url)) {
+        const shouldSkipFilter = true
+        this.addUrlToFrontier(url, shouldSkipFilter)
       }
     }
 
@@ -362,8 +367,7 @@ class WebCrawler {
                   !this.visited.includes(newUrl) &&
                   this.filter(newUrl)
                 ) {
-                  this.frontier.push(newUrl)
-                  this.emit("add-url", { url: newUrl })
+                  this.addUrlToFrontier(newUrl)
                 }
               })
             }
