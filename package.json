@@ -18,5 +18,8 @@
   "dependencies": {
     "@jrc03c/js-text-tools": "^0.0.25",
     "@jrc03c/js-type-experiments": "^0.0.12"
+  },
+  "scripts": {
+    "pub": "npm version patch --force && npm publish --access=public"
   }
 }

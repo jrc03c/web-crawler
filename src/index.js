@@ -1,7 +1,6 @@
 const { flatten } = require("@jrc03c/js-math-tools")
 const { JSDOM, VirtualConsole } = require("jsdom")
 const absolutifyUrl = require("./helpers/absolutify-url")
-const fs = require("node:fs")
 const pathJoin = require("./helpers/path-join")
 const pause = require("@jrc03c/pause")
 const RobotsConfig = require("./helpers/robots-config")
@@ -57,12 +56,6 @@ class WebCrawler {
   visited = []
 
   constructor(options) {
-    const logsDir = pathJoin(options.dir, "logs")
-
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true })
-    }
-
     this.delay = options.delay || this.delay
     this.filter = options.filter || this.filter
     this.requestTimeout = options.requestTimeout || this.requestTimeout
