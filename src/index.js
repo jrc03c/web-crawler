@@ -94,7 +94,7 @@ class WebCrawler {
   async createDomainConfiguration(domain) {
     // fetch and parse robots.txt
     const config = await (async () => {
-      const robotsUrl = "https://" + pathJoin(domain, "robots.txt")
+      const robotsUrl = "http://" + pathJoin(domain, "robots.txt")
       const response = await fetch(robotsUrl)
 
       if (response.status === 200) {
@@ -112,8 +112,8 @@ class WebCrawler {
     // fetch and parse sitemap(s)
     const toCrawl = await (async () => {
       if (config.sitemapUrls.length === 0) {
-        config.sitemapUrls.push("https://" + pathJoin(domain, "sitemap.xml"))
-        config.sitemapUrls.push("https://" + pathJoin(domain, "sitemap.txt"))
+        config.sitemapUrls.push("http://" + pathJoin(domain, "sitemap.xml"))
+        config.sitemapUrls.push("http://" + pathJoin(domain, "sitemap.txt"))
       }
 
       const toCrawl = []
