@@ -8,6 +8,15 @@ const RobotsConfig = require("./helpers/robots-config")
 const virtualConsole = new VirtualConsole()
 virtualConsole.on("error", () => {})
 
+async function fetchWithTimeout(url, options, ms) {
+  options = options || {}
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), ms)
+  const response = await fetch(url, { ...options, signal: controller.signal })
+  clearTimeout(timeout)
+  return response
+}
+
 function getAllElements(dom, root) {
   root = root || dom.window.document.body
   const out = [root]
@@ -95,16 +104,26 @@ class WebCrawler {
     // fetch and parse robots.txt
     const config = await (async () => {
       const robotsUrl = "http://" + pathJoin(domain, "robots.txt")
-      const response = await fetch(robotsUrl)
 
-      if (response.status === 200) {
-        const raw = await response.text()
-        const config = RobotsConfig.parse(raw)
-        return config
-      } else {
-        const message = `No robots.txt file was found for the domain "${domain}"!`
+      try {
+        const response = await fetchWithTimeout(
+          robotsUrl,
+          null,
+          this.requestTimeout,
+        )
 
-        this.emit("warn", { domain, message })
+        if (response.status === 200) {
+          const raw = await response.text()
+          const config = RobotsConfig.parse(raw)
+          return config
+        } else {
+          const message = `No robots.txt file was found for the domain "${domain}"!`
+
+          this.emit("warn", { domain, message })
+          return new RobotsConfig()
+        }
+      } catch (e) {
+        this.emit("error", { message: e.toString(), url: robotsUrl })
         return new RobotsConfig()
       }
     })()
@@ -119,53 +138,61 @@ class WebCrawler {
       const toCrawl = []
 
       for (const sitemapUrl of config.sitemapUrls) {
-        const response = await fetch(sitemapUrl)
+        try {
+          const response = await fetchWithTimeout(
+            sitemapUrl,
+            null,
+            this.requestTimeout,
+          )
 
-        if (response.status === 200) {
-          const raw = await response.text()
+          if (response.status === 200) {
+            const raw = await response.text()
 
-          if (sitemapUrl.toLowerCase().endsWith(".xml")) {
-            try {
-              const dom = new JSDOM(raw, {
-                contentType: "text/xml",
-                virtualConsole,
-              })
+            if (sitemapUrl.toLowerCase().endsWith(".xml")) {
+              try {
+                const dom = new JSDOM(raw, {
+                  contentType: "text/xml",
+                  virtualConsole,
+                })
 
-              const childNodes = Array.from(
-                dom.window.document.documentElement.childNodes,
-              )
+                const childNodes = Array.from(
+                  dom.window.document.documentElement.childNodes,
+                )
 
-              for (const child of childNodes) {
-                try {
-                  const loc = child.querySelector("loc").innerHTML
-                  toCrawl.push(loc)
-                } catch (e) {
-                  // ...
+                for (const child of childNodes) {
+                  try {
+                    const loc = child.querySelector("loc").innerHTML
+                    toCrawl.push(loc)
+                  } catch (e) {
+                    // ...
+                  }
                 }
+              } catch (e) {
+                const message = `Error parsing sitemap: (${sitemapUrl}) ${e}`
+                this.emit("error", { message, url: sitemapUrl })
+
+                config.sitemapUrls.splice(
+                  config.sitemapUrls.indexOf(sitemapUrl),
+                  1,
+                )
               }
-            } catch (e) {
-              const message = `Error parsing sitemap: (${sitemapUrl}) ${e}`
-              this.emit("error", { message, url: sitemapUrl })
-
-              config.sitemapUrls.splice(
-                config.sitemapUrls.indexOf(sitemapUrl),
-                1,
-              )
             }
-          }
 
-          if (sitemapUrl.toLowerCase().endsWith(".txt")) {
-            raw
-              .split("\n")
-              .map(v => v.trim())
-              .filter(v => v.length > 0)
-              .forEach(v => toCrawl.push(v))
-          }
-        } else {
-          const message = `Error fetching sitemap: (${response.status}) ${sitemapUrl}`
+            if (sitemapUrl.toLowerCase().endsWith(".txt")) {
+              raw
+                .split("\n")
+                .map(v => v.trim())
+                .filter(v => v.length > 0)
+                .forEach(v => toCrawl.push(v))
+            }
+          } else {
+            const message = `Error fetching sitemap: (${response.status}) ${sitemapUrl}`
 
-          this.emit("error", { message, response, url: sitemapUrl })
-          config.sitemapUrls.splice(config.sitemapUrls.indexOf(sitemapUrl), 1)
+            this.emit("error", { message, response, url: sitemapUrl })
+            config.sitemapUrls.splice(config.sitemapUrls.indexOf(sitemapUrl), 1)
+          }
+        } catch (e) {
+          this.emit("error", { message: e.toString(), url: sitemapUrl })
         }
       }
 
@@ -293,16 +320,7 @@ class WebCrawler {
 
       try {
         this.emit("before-crawl", { url })
-        const controller = new AbortController()
-
-        const timeout = setTimeout(
-          () => controller.abort(),
-          this.requestTimeout,
-        )
-
-        const response = await fetch(url, { signal: controller.signal })
-        clearTimeout(timeout)
-
+        const response = await fetchWithTimeout(url, null, this.requestTimeout)
         const raw = await response.text()
         this.emit("fetch", { raw, response, url })
 
