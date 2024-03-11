@@ -1,34 +1,13 @@
-const { flatten } = require("@jrc03c/js-math-tools")
 const { JSDOM, VirtualConsole } = require("jsdom")
-const absolutifyUrl = require("./helpers/absolutify-url")
+const extractUrlsFromCss = require("./helpers/extract-urls-from-css")
+const fetchWithTimeout = require("./helpers/fetch-with-timeout")
+const getAllUrls = require("./helpers/get-all-urls")
 const pathJoin = require("./helpers/path-join")
 const pause = require("@jrc03c/pause")
 const RobotsConfig = require("./helpers/robots-config")
 
 const virtualConsole = new VirtualConsole()
 virtualConsole.on("error", () => {})
-
-async function fetchWithTimeout(url, options, ms) {
-  options = options || {}
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), ms)
-  const response = await fetch(url, { ...options, signal: controller.signal })
-  clearTimeout(timeout)
-  return response
-}
-
-function getAllElements(dom, root) {
-  root = root || dom.window.document.body
-  const out = [root]
-
-  if (root.children) {
-    Array.from(root.children).forEach(child => {
-      out.push(...getAllElements(dom, child))
-    })
-  }
-
-  return flatten(out)
-}
 
 class WebCrawler {
   static DisallowReasons = {
@@ -54,7 +33,7 @@ class WebCrawler {
 
   delay = 100
   domainConfigs = {}
-  filter = () => true
+  filter = async () => true
   frontier = []
   isCrawling = false
   isPaused = false
@@ -80,7 +59,7 @@ class WebCrawler {
         : options.shouldOnlyFollowSitemap
   }
 
-  addUrlToFrontier(url, shouldSkipFilter) {
+  async addUrlToFrontier(url, shouldSkipFilter) {
     if (this.frontier.includes(url)) {
       return false
     }
@@ -90,7 +69,7 @@ class WebCrawler {
     }
 
     if (!shouldSkipFilter) {
-      if (!this.filter(url)) {
+      if (!(await this.filter(url))) {
         return false
       }
     }
@@ -200,7 +179,11 @@ class WebCrawler {
     })()
 
     this.domainConfigs[domain] = config
-    toCrawl.forEach(url => this.addUrlToFrontier(url))
+
+    for (const url of toCrawl) {
+      await this.addUrlToFrontier(url)
+    }
+
     return config
   }
 
@@ -247,6 +230,14 @@ class WebCrawler {
     return this
   }
 
+  removeUrlFromFrontier(url) {
+    while (this.frontier.includes(url)) {
+      this.frontier.splice(this.frontier.indexOf(url), 1)
+    }
+
+    return this
+  }
+
   async start(url) {
     // - fetch and parse robots.txt
     // - fetch and parse sitemap(s)
@@ -280,7 +271,7 @@ class WebCrawler {
 
       if (!this.frontier.includes(url) && !this.visited.includes(url)) {
         const shouldSkipFilter = true
-        this.addUrlToFrontier(url, shouldSkipFilter)
+        await this.addUrlToFrontier(url, shouldSkipFilter)
       }
     }
 
@@ -298,7 +289,7 @@ class WebCrawler {
         this.visited.push(url)
       }
 
-      if (!this.filter(url)) {
+      if (!(await this.filter(url))) {
         this.emit("filter-url", { url })
         continue
       }
@@ -325,38 +316,18 @@ class WebCrawler {
         this.emit("fetch", { raw, response, url })
 
         if (response.status === 200) {
-          if (this.shouldHonorBotRules) {
-            const xRobotsTag = response.headers.get("x-robots-tag")
-
-            if (xRobotsTag && xRobotsTag === "noindex") {
-              this.emit("disallow-url", {
-                reason:
-                  WebCrawler.DisallowReasons.DISALLOWED_BY_RESPONSE_HEADER,
-                url,
-              })
-
-              await pause(this.delay)
-              continue
-            }
-          }
-
-          try {
-            // NOTE: This `try` block currently implies that we're always
-            // crawling HTML pages; but that may not always be true! Do we want
-            // to cache, for example, the contents of JS or CSS files? If so,
-            // then we need to rework this block.
-            const dom = new JSDOM(raw, { virtualConsole })
-
+          if (url.toLowerCase().endsWith(".css")) {
+            extractUrlsFromCss(url, raw).forEach(newUrl =>
+              this.addUrlToFrontier(newUrl),
+            )
+          } else {
             if (this.shouldHonorBotRules) {
-              const metas = Array.from(
-                dom.window.document.querySelectorAll("meta"),
-              )
+              const xRobotsTag = response.headers.get("x-robots-tag")
 
-              const meta = metas.find(meta => meta.name === "robots")
-
-              if (meta && meta.content.includes("noindex")) {
+              if (xRobotsTag && xRobotsTag === "noindex") {
                 this.emit("disallow-url", {
-                  reason: WebCrawler.DisallowReasons.DISALLOWED_BY_META_TAG,
+                  reason:
+                    WebCrawler.DisallowReasons.DISALLOWED_BY_RESPONSE_HEADER,
                   url,
                 })
 
@@ -365,29 +336,46 @@ class WebCrawler {
               }
             }
 
-            if (
-              !this.shouldOnlyFollowSitemap ||
-              config.sitemapUrls.length === 0
-            ) {
-              getAllElements(dom).forEach(el => {
-                if (!el.href && !el.src) return
-                const newUrl = absolutifyUrl(url, el.href || el.src)
+            try {
+              // NOTE: This `try` block currently implies that we're always
+              // crawling HTML pages; but that may not always be true! Do we want
+              // to cache, for example, the contents of JS or CSS files? If so,
+              // then we need to rework this block.
+              const dom = new JSDOM(raw, { virtualConsole })
 
-                if (
-                  !this.frontier.includes(newUrl) &&
-                  !this.visited.includes(newUrl) &&
-                  this.filter(newUrl)
-                ) {
-                  this.addUrlToFrontier(newUrl)
+              if (this.shouldHonorBotRules) {
+                const metas = Array.from(
+                  dom.window.document.querySelectorAll("meta"),
+                )
+
+                const meta = metas.find(meta => meta.name === "robots")
+
+                if (meta && meta.content.includes("noindex")) {
+                  this.emit("disallow-url", {
+                    reason: WebCrawler.DisallowReasons.DISALLOWED_BY_META_TAG,
+                    url,
+                  })
+
+                  await pause(this.delay)
+                  continue
                 }
-              })
-            }
+              }
 
-            this.emit("after-crawl", { dom, raw, response, url })
-            await pause(this.delay)
-          } catch (e) {
-            const message = `Error processing contents of URL: (${url}) ${e}`
-            this.emit("error", { message, url })
+              if (
+                !this.shouldOnlyFollowSitemap ||
+                config.sitemapUrls.length === 0
+              ) {
+                getAllUrls(url, dom).forEach(newUrl =>
+                  this.addUrlToFrontier(newUrl),
+                )
+              }
+
+              this.emit("after-crawl", { dom, raw, response, url })
+              await pause(this.delay)
+            } catch (e) {
+              const message = `Error processing contents of URL: (${url}) ${e}`
+              this.emit("error", { message, url })
+            }
           }
         } else {
           const message = `Error fetching URL: (${response.status}) ${url}`

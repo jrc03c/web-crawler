@@ -74,7 +74,7 @@ An object whose keys and values, respectively, are domain names and bot configur
 
 #### `filter`
 
-A function that receives a URL and returns a boolean indicating whether or not the URL should be crawled (`true` = the URL should be crawled; `false` = the URL should _not_ be crawled). The default is a function that always returns `true`.
+A function that receives a URL and returns a boolean indicating whether or not the URL should be crawled (`true` = the URL should be crawled; `false` = the URL should _not_ be crawled). The function can be either synchronous or asynchronous. The default value is an asynchronous function that always returns `true`.
 
 #### `frontier`
 
@@ -137,6 +137,10 @@ Adds the given callback to the array of callback functions in the instance's `su
 #### `pause()`
 
 Pauses the crawling process and emits the "pause" event. Returns the `WebCrawler` instance.
+
+#### `removeUrlFromFrontier(url)`
+
+Removes all instances of the URL from the `frontier`. Returns the `WebCrawler` instance.
 
 #### `start(url : string)`
 

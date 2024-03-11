@@ -21,7 +21,12 @@ function absolutifyUrl(currentUrl, targetUrl) {
 
   if (targetUrl.startsWith("/")) {
     const temp = new URL(currentUrl)
-    return temp.protocol + "//" + pathJoin(temp.hostname, targetUrl)
+
+    return (
+      temp.protocol +
+      "//" +
+      pathJoin(temp.hostname + ":" + temp.port, targetUrl)
+    )
   }
 
   const temp = new URL(currentUrl)
@@ -30,7 +35,11 @@ function absolutifyUrl(currentUrl, targetUrl) {
     ? temp.pathname.split("/").slice(0, -1).join("/")
     : temp.pathname
 
-  return temp.protocol + "//" + pathJoin(temp.hostname, updatedPath, targetUrl)
+  return (
+    temp.protocol +
+    "//" +
+    pathJoin(temp.hostname + ":" + temp.port, updatedPath, targetUrl)
+  )
 }
 
 module.exports = absolutifyUrl
