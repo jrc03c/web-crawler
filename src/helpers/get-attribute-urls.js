@@ -16,6 +16,7 @@ function getAttributeUrls(url, el, included) {
         .map(a => el.getAttribute(a))
         .map(v =>
           v
+            .toString()
             .split(";")
             .map(v =>
               v

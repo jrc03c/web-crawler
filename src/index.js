@@ -81,102 +81,117 @@ class WebCrawler {
 
   async createDomainConfiguration(domain) {
     // fetch and parse robots.txt
-    const config = await (async () => {
-      const robotsUrl = "http://" + pathJoin(domain, "robots.txt")
+    let config
 
-      try {
-        const response = await fetchWithTimeout(
-          robotsUrl,
-          null,
-          this.requestTimeout,
-        )
+    if (this.shouldHonorBotRules) {
+      config = await (async () => {
+        const robotsUrl = "http://" + pathJoin(domain, "robots.txt")
 
-        if (response.status === 200) {
-          const raw = await response.text()
-          const config = RobotsConfig.parse(raw)
-          return config
-        } else {
-          const message = `No robots.txt file was found for the domain "${domain}"!`
-
-          this.emit("warn", { domain, message })
-          return new RobotsConfig()
-        }
-      } catch (e) {
-        this.emit("error", { message: e.toString(), url: robotsUrl })
-        return new RobotsConfig()
-      }
-    })()
-
-    // fetch and parse sitemap(s)
-    const toCrawl = await (async () => {
-      if (config.sitemapUrls.length === 0) {
-        config.sitemapUrls.push("http://" + pathJoin(domain, "sitemap.xml"))
-        config.sitemapUrls.push("http://" + pathJoin(domain, "sitemap.txt"))
-      }
-
-      const toCrawl = []
-
-      for (const sitemapUrl of config.sitemapUrls) {
         try {
           const response = await fetchWithTimeout(
-            sitemapUrl,
+            robotsUrl,
             null,
             this.requestTimeout,
           )
 
           if (response.status === 200) {
             const raw = await response.text()
-
-            if (sitemapUrl.toLowerCase().endsWith(".xml")) {
-              try {
-                const dom = new JSDOM(raw, {
-                  contentType: "text/xml",
-                  virtualConsole,
-                })
-
-                const childNodes = Array.from(
-                  dom.window.document.documentElement.childNodes,
-                )
-
-                for (const child of childNodes) {
-                  try {
-                    const loc = child.querySelector("loc").innerHTML
-                    toCrawl.push(loc)
-                  } catch (e) {
-                    // ...
-                  }
-                }
-              } catch (e) {
-                const message = `Error parsing sitemap: (${sitemapUrl}) ${e}`
-                this.emit("error", { message, url: sitemapUrl })
-
-                config.sitemapUrls.splice(
-                  config.sitemapUrls.indexOf(sitemapUrl),
-                  1,
-                )
-              }
-            }
-
-            if (sitemapUrl.toLowerCase().endsWith(".txt")) {
-              raw
-                .split("\n")
-                .map(v => v.trim())
-                .filter(v => v.length > 0)
-                .forEach(v => toCrawl.push(v))
-            }
+            const config = RobotsConfig.parse(raw)
+            return config
           } else {
-            const message = `Error fetching sitemap: (${response.status}) ${sitemapUrl}`
+            const message = `No robots.txt file was found for the domain "${domain}"!`
 
-            this.emit("error", { message, response, url: sitemapUrl })
-            config.sitemapUrls.splice(config.sitemapUrls.indexOf(sitemapUrl), 1)
+            this.emit("warn", { domain, message })
+            return new RobotsConfig()
           }
         } catch (e) {
-          this.emit("error", { message: e.toString(), url: sitemapUrl })
+          this.emit("error", { message: e.toString(), url: robotsUrl })
+          return new RobotsConfig()
         }
-      }
+      })()
+    } else {
+      config = new RobotsConfig()
+    }
 
-      return toCrawl
-    })()
+    // fetch and parse sitemap(s)
+    let toCrawl
+
+    if (this.shouldOnlyFollowSitemap) {
+      toCrawl = await (async () => {
+        if (config.sitemapUrls.length === 0) {
+          config.sitemapUrls.push("http://" + pathJoin(domain, "sitemap.xml"))
+          config.sitemapUrls.push("http://" + pathJoin(domain, "sitemap.txt"))
+        }
+
+        const toCrawl = []
+
+        for (const sitemapUrl of config.sitemapUrls) {
+          try {
+            const response = await fetchWithTimeout(
+              sitemapUrl,
+              null,
+              this.requestTimeout,
+            )
+
+            if (response.status === 200) {
+              const raw = await response.text()
+
+              if (sitemapUrl.toLowerCase().endsWith(".xml")) {
+                try {
+                  const dom = new JSDOM(raw, {
+                    contentType: "text/xml",
+                    virtualConsole,
+                  })
+
+                  const childNodes = Array.from(
+                    dom.window.document.documentElement.childNodes,
+                  )
+
+                  for (const child of childNodes) {
+                    try {
+                      const loc = child.querySelector("loc").innerHTML
+                      toCrawl.push(loc)
+                    } catch (e) {
+                      // ...
+                    }
+                  }
+                } catch (e) {
+                  const message = `Error parsing sitemap: (${sitemapUrl}) ${e}`
+                  this.emit("error", { message, url: sitemapUrl })
+
+                  config.sitemapUrls.splice(
+                    config.sitemapUrls.indexOf(sitemapUrl),
+                    1,
+                  )
+                }
+              }
+
+              if (sitemapUrl.toLowerCase().endsWith(".txt")) {
+                raw
+                  .split("\n")
+                  .map(v => v.trim())
+                  .filter(v => v.length > 0)
+                  .forEach(v => toCrawl.push(v))
+              }
+            } else {
+              const message = `Error fetching sitemap: (${response.status}) ${sitemapUrl}`
+
+              this.emit("error", { message, response, url: sitemapUrl })
+              config.sitemapUrls.splice(
+                config.sitemapUrls.indexOf(sitemapUrl),
+                1,
+              )
+            }
+          } catch (e) {
+            this.emit("error", { message: e.toString(), url: sitemapUrl })
+          }
+        }
+
+        return toCrawl
+      })()
+    } else {
+      toCrawl = []
+    }
 
     this.domainConfigs[domain] = config
 
@@ -365,7 +380,9 @@ class WebCrawler {
                 !this.shouldOnlyFollowSitemap ||
                 config.sitemapUrls.length === 0
               ) {
-                getAllUrls(url, dom).forEach(newUrl =>
+                const validAttributes = ["href", "src"]
+
+                getAllUrls(url, dom, validAttributes).forEach(newUrl =>
                   this.addUrlToFrontier(newUrl),
                 )
               }

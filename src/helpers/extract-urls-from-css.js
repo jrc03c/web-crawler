@@ -4,18 +4,16 @@ const absolutifyUrl = require("./absolutify-url")
 function extractUrlsFromCss(url, css) {
   return sort(
     set(
-      css
-        .match(/url\(.*?\)/g)
-        .map(v =>
-          absolutifyUrl(
-            url,
-            v
-              .replace("url(", "")
-              .replace(")", "")
-              .replaceAll("'", "")
-              .replaceAll('"', ""),
-          ),
+      (css.match(/url\(.*?\)/g) || []).map(v =>
+        absolutifyUrl(
+          url,
+          v
+            .replace("url(", "")
+            .replace(")", "")
+            .replaceAll("'", "")
+            .replaceAll('"', ""),
         ),
+      ),
     ),
   )
 }
