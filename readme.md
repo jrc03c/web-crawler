@@ -1,3 +1,7 @@
+> ⚠️ **NOTE:** ⚠️ This project is being merged into a monorepo [here](https://github.com/jrc03c/monorepo/tree/main/packages/web-crawler). This repo will soon be archived.
+
+---
+
 # Intro
 
 This is a simple web crawler I plan to use for personal projects.
